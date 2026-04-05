@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WagerAttack Graphics</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background:#111; color:#fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; min-height:100vh; }
+  a { color:#FFD60A; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  header { display:flex; align-items:center; justify-content:space-between; padding-bottom:16px; border-bottom:2px solid #E63946; margin-bottom:20px; flex-wrap:wrap; gap:12px;}
+  header h1 { font-size:22px; letter-spacing:2px; }
+  header h1 .red { color:#E63946; }
+  .status { display:flex; gap:14px; align-items:center; font-size:12px; color:#999; flex-wrap:wrap;}
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; background:#666;}
+  .dot.ok{ background:#2ecc71;} .dot.err{ background:#E63946;} .dot.load{ background:#FFD60A;}
+  button { font-family:inherit; cursor:pointer; background:#1a1a1a; color:#fff; border:1px solid #2a2a2a; padding:8px 14px; border-radius:6px; font-size:13px; transition:all .15s;}
+  button:hover:not(:disabled){ background:#2a2a2a; border-color:#E63946;}
+  button:disabled{ opacity:.5; cursor:not-allowed;}
+  button.primary{ background:#E63946; border-color:#E63946;} button.primary:hover:not(:disabled){ background:#c12d39;}
+  button.yellow{ background:#FFD60A; color:#111; border-color:#FFD60A; font-weight:600;} button.yellow:hover:not(:disabled){ background:#e6c009;}
+  .tabs { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap;}
+  .tab { padding:10px 22px; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; color:#999;}
+  .tab.active { background:#E63946; color:#fff; border-color:#E63946;}
+  .bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:12px; flex-wrap:wrap;}
+  .bar .count{ color:#999; font-size:13px;}
+  .games { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:16px;}
+  .card { background:#1a1a1a; border:1px solid #2a2a2a; border-radius:10px; padding:14px; }
+  .card .teams { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .card .time { font-size:12px; color:#999; margin-bottom:10px;}
+  .card .score { font-size:22px; font-weight:700; color:#FFD60A; margin-bottom:6px;}
+  .badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase;}
+  .badge.live{ background:#E63946;} .badge.final{ background:#666;} .badge.sched{ background:#333; color:#999;}
+  .lines { display:flex; gap:10px; font-size:11px; color:#ccc; margin-top:8px; flex-wrap:wrap;}
+  .lines span{ background:#111; padding:4px 8px; border-radius:4px; border:1px solid #2a2a2a;}
+  .no-odds{ color:#777; font-size:11px; font-style:italic; margin-top:8px;}
+  .card canvas { width:100%; max-width:100%; border-radius:6px; margin-top:10px; background:#111;}
+  .actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+  .actions button { flex:1; padding:8px; font-size:12px;}
+  .empty { text-align:center; padding:60px 20px; color:#777;}
+  .banner { padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;}
+  .banner.warn { background:#3a2a0a; border:1px solid #FFD60A; color:#FFD60A;}
+  .banner.err { background:#3a0a0a; border:1px solid #E63946; color:#ffb3b3;}
+  footer { margin-top:40px; padding-top:16px; border-top:1px solid #2a2a2a; color:#666; font-size:11px; text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="red">WAGER</span>ATTACK <span style="color:#999; font-weight:300;">// Graphics</span></h1>
+    <div class="status">
+      <span id="stWA"><span class="dot load"></span>WagerAttack: connecting…</span>
+      <span id="stESPN"><span class="dot load"></span>ESPN: connecting…</span>
+      <button id="refresh">↻ Refresh</button>
+    </div>
+  </header>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-sport="MLB">MLB</div>
+    <div class="tab" data-sport="NBA">NBA</div>
+    <div class="tab" data-sport="NHL">NHL</div>
+  </div>
+
+  <div id="banner"></div>
+
+  <div class="bar">
+    <div class="count" id="count">Loading…</div>
+    <button class="yellow" id="dlAll">⬇ Download All</button>
+  </div>
+
+  <div class="games" id="games"><div class="empty">Loading games…</div></div>
+
+  <footer>
+    WagerAttack.ag &nbsp;•&nbsp; Must be 18+ (21+ where applicable) &nbsp;•&nbsp; Lines subject to change
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   WagerAttack Graphics — single-file app
+   ============================================================ */
+
+const PROXY = "https://wa-proxy.mahmoudwakil89.workers.dev";
+const WA_USER = "mm307";
+const WA_PASS = "test";
+const WA_OFFICE = "M1ATTA";
+
+const SPORT_CONFIG = {
+  MLB: { sportType:"BASEBALL", sportSubType:"MLB", propDescription:"",     espn:"baseball/mlb" },
+  NBA: { sportType:"BASKETBALL", sportSubType:"NBA", propDescription:"Game", espn:"basketball/nba" },
+  NHL: { sportType:"HOCKEY", sportSubType:"NHL", propDescription:"",      espn:"hockey/nhl" },
+};
+
+/* ---------- Team colors (per sport) ---------- */
+const COLORS = {
+  MLB: {
+    STL:["#C41E3A","#0C2340"], DET:["#0C2340","#FA4616"], NYY:["#003087","#E4002B"], BOS:["#BD3039","#0C2340"],
+    LAD:["#005A9C","#EF3E42"], CHC:["#0E3386","#CC3433"], SF:["#FD5A1E","#27251F"], HOU:["#002D62","#EB6E1F"],
+    ATL:["#CE1141","#13274F"], PHI:["#E81828","#002D72"], NYM:["#002D72","#FF5910"], SD:["#2F241D","#FFC425"],
+    MIN:["#002B5C","#D31145"], SEA:["#0C2C56","#005C5C"], TB:["#092C5C","#8FBCE6"], CLE:["#00385D","#E50022"],
+    BAL:["#DF4601","#27251F"], TEX:["#003278","#C0111F"], MIL:["#FFC52F","#12284B"], TOR:["#134A8E","#1D2D5C"],
+    ARI:["#A71930","#E3D4AD"], COL:["#33006F","#C4CED4"], PIT:["#27251F","#FDB827"], KC:["#004687","#BD9B60"],
+    CIN:["#C6011F","#000000"], CWS:["#27251F","#C4CED4"], LAA:["#BA0021","#003263"], MIA:["#00A3E0","#EF3340"],
+    OAK:["#003831","#EFB21E"], WSH:["#AB0003","#14225A"]
+  },
+  NBA: {
+    SAS:["#C4CED4","#000000"], DEN:["#0E2240","#FEC524"], LAL:["#552583","#FDB927"], GSW:["#1D428A","#FFC72C"],
+    PHX:["#1D1160","#E56020"], DAL:["#00538C","#002B5E"], NYK:["#006BB6","#F58426"], MEM:["#5D76A9","#12173F"],
+    SAC:["#5A2D81","#63727A"], OKC:["#007AC1","#EF6020"], IND:["#002D62","#FDBB30"], CHI:["#CE1141","#000000"],
+    NOP:["#0C2340","#C8102E"], BKN:["#000000","#FFFFFF"], CHA:["#1D1160","#00788C"], ORL:["#0077C0","#C4CED4"],
+    POR:["#E03A3E","#000000"], UTA:["#002B5C","#00471B"], WAS:["#002B5C","#E31837"], LAC:["#C8102E","#1D428A"],
+    BOS:["#007A33","#BA9653"], MIA:["#98002E","#F9A01B"], MIL:["#00471B","#EEE1C6"], PHI:["#006BB6","#ED174C"],
+    CLE:["#860038","#FDBB30"], TOR:["#CE1141","#000000"], ATL:["#E03A3E","#C1D32F"], DET:["#C8102E","#1D42BA"],
+    HOU:["#CE1141","#000000"], MIN:["#0C2340","#236192"]
+  },
+  NHL: {
+    DET:["#CE1141","#FFFFFF"], NYR:["#0038A8","#CE1141"], TBL:["#002868","#FFFFFF"], FLA:["#041E42","#C8102E"],
+    TOR:["#003E7E","#FFFFFF"], BOS:["#FFB81C","#000000"], COL:["#6F263D","#236192"], DAL:["#006847","#8F8F8C"],
+    EDM:["#041E42","#FF4C00"], CAR:["#CC0000","#000000"], VGK:["#B4975A","#333F42"], WPG:["#041E42","#004C97"],
+    NYI:["#00539B","#F47D30"], PIT:["#000000","#FCB514"], WSH:["#041E42","#C8102E"], MIN:["#154734","#A6192E"],
+    NSH:["#FFB81C","#041E42"], STL:["#002F87","#FCB514"], CGY:["#C8102E","#F1BE48"], MTL:["#AF1E2D","#192168"],
+    OTT:["#C52032","#C2912C"], VAN:["#00205B","#00843D"], PHI:["#F74902","#000000"], LAK:["#111111","#A2AAAD"],
+    SJS:["#006D75","#EA7200"], ANA:["#F47A38","#B9975B"], CBJ:["#002654","#CE1141"], BUF:["#002654","#FCB514"],
+    SEA:["#001628","#99D9D9"], NJD:["#CE1141","#000000"], CHI:["#CF0A2C","#000000"]
+  }
+};
+
+/* ---------- WA name → ESPN abbr (per sport) ---------- */
+const NAME_MAP = {
+  MLB: {
+    "St Louis Cardinals":"STL","Detroit Tigers":"DET","New York Yankees":"NYY","Boston Red Sox":"BOS",
+    "Los Angeles Dodgers":"LAD","Chicago Cubs":"CHC","San Francisco Giants":"SF","Houston Astros":"HOU",
+    "Atlanta Braves":"ATL","Philadelphia Phillies":"PHI","New York Mets":"NYM","San Diego Padres":"SD",
+    "Minnesota Twins":"MIN","Seattle Mariners":"SEA","Tampa Bay Rays":"TB","Cleveland Guardians":"CLE",
+    "Baltimore Orioles":"BAL","Texas Rangers":"TEX","Milwaukee Brewers":"MIL","Toronto Blue Jays":"TOR",
+    "Arizona Diamondbacks":"ARI","Colorado Rockies":"COL","Pittsburgh Pirates":"PIT","Kansas City Royals":"KC",
+    "Cincinnati Reds":"CIN","Chicago White Sox":"CWS","Los Angeles Angels":"LAA","Miami Marlins":"MIA",
+    "Oakland Athletics":"OAK","Athletics":"OAK","Washington Nationals":"WSH"
+  },
+  NBA: {
+    "San Antonio Spurs":"SAS","Denver Nuggets":"DEN","Los Angeles Lakers":"LAL","Golden State Warriors":"GSW",
+    "Boston Celtics":"BOS","Miami Heat":"MIA","Phoenix Suns":"PHX","Milwaukee Bucks":"MIL",
+    "Dallas Mavericks":"DAL","Philadelphia 76ers":"PHI","Cleveland Cavaliers":"CLE","New York Knicks":"NYK",
+    "Memphis Grizzlies":"MEM","Sacramento Kings":"SAC","Minnesota Timberwolves":"MIN","Oklahoma City Thunder":"OKC",
+    "Indiana Pacers":"IND","Chicago Bulls":"CHI","Toronto Raptors":"TOR","New Orleans Pelicans":"NOP",
+    "Atlanta Hawks":"ATL","Brooklyn Nets":"BKN","Charlotte Hornets":"CHA","Detroit Pistons":"DET",
+    "Houston Rockets":"HOU","LA Clippers":"LAC","Orlando Magic":"ORL","Portland Trail Blazers":"POR",
+    "Utah Jazz":"UTA","Washington Wizards":"WAS"
+  },
+  NHL: {
+    "Detroit Red Wings":"DET","New York Rangers":"NYR","Tampa Bay Lightning":"TBL","Florida Panthers":"FLA",
+    "Toronto Maple Leafs":"TOR","Boston Bruins":"BOS","Colorado Avalanche":"COL","Dallas Stars":"DAL",
+    "Edmonton Oilers":"EDM","Carolina Hurricanes":"CAR","Vegas Golden Knights":"VGK","Winnipeg Jets":"WPG",
+    "New York Islanders":"NYI","Pittsburgh Penguins":"PIT","Washington Capitals":"WSH","Minnesota Wild":"MIN",
+    "Nashville Predators":"NSH","St Louis Blues":"STL","Calgary Flames":"CGY","Montreal Canadiens":"MTL",
+    "Ottawa Senators":"OTT","Vancouver Canucks":"VAN","Philadelphia Flyers":"PHI","Los Angeles Kings":"LAK",
+    "San Jose Sharks":"SJS","Anaheim Ducks":"ANA","Columbus Blue Jackets":"CBJ","Buffalo Sabres":"BUF",
+    "Seattle Kraken":"SEA","New Jersey Devils":"NJD","Chicago Blackhawks":"CHI"
+  }
+};
+
+/* ============================================================
+   State
+   ============================================================ */
+const state = {
+  token: null,
+  sport: "MLB",
+  waStatus: "load",        // load | ok | err
+  espnStatus: "load",
+  waError: null,
+  waLines: [],             // raw WA lines for current sport
+  espnEvents: [],          // ESPN events for current sport
+  games: [],               // merged games ready to render
+};
+
+/* ============================================================
+   API helpers
+   ============================================================ */
+async function waAuth() {
+  const body = new URLSearchParams({
+    customerID: WA_USER, password: WA_PASS,
+    office: WA_OFFICE, operation:"authenticateCustomer", agentSite:"0"
+  }).toString();
+  const r = await fetch(`${PROXY}/cloud/api/System/authenticateCustomer`, {
+    method:"POST",
+    headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+    body
+  });
+  if (!r.ok) throw new Error(`Auth HTTP ${r.status}`);
+  const j = await r.json();
+  if (!j.code) throw new Error("Auth: no token in response");
+  state.token = j.code;
+  return j.code;
+}
+
+async function waGetLines(sport) {
+  const cfg = SPORT_CONFIG[sport];
+  const body = new URLSearchParams({
+    customerID: WA_USER.toUpperCase(), operation:"Get_LeagueLines2",
+    sportType: cfg.sportType, sportSubType: cfg.sportSubType,
+    period:"Game", hourFilter:"0", propDescription: cfg.propDescription,
+    wagerType:"Straight", keyword:"", office: WA_OFFICE, correlationID:"",
+    periodNumber:"0", grouping:"", periods:"0", rotOrder:"0",
+    placeLateFlag:"false", RRO:"1", agentSite:"0"
+  }).toString();
+  const r = await fetch(`${PROXY}/cloud/api/Lines/Get_LeagueLines2`, {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/x-www-form-urlencoded",
+      "Authorization":`Bearer ${state.token}`
+    },
+    body
+  });
+  if (!r.ok) throw new Error(`Lines HTTP ${r.status}`);
+  const j = await r.json();
+  return j.Lines || [];
+}
+
+async function espnScoreboard(sport) {
+  const cfg = SPORT_CONFIG[sport];
+  const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${cfg.espn}/scoreboard`);
+  if (!r.ok) throw new Error(`ESPN HTTP ${r.status}`);
+  const j = await r.json();
+  return j.events || [];
+}
+
+/* ============================================================
+   Matching: WA line → ESPN event
+   ============================================================ */
+function cleanTeamName(s) {
+  if (!s) return "";
+  // Strip doubleheader suffixes like " GM1", " GM2", " Game 1", " (1)", etc.
+  return String(s).replace(/\s+GM\s*\d+$/i,"").replace(/\s+Game\s*\d+$/i,"").replace(/\s*\(\d+\)$/,"").trim();
+}
+
+function resolveAbbr(sport, waFullName) {
+  if (!waFullName) return null;
+  const clean = cleanTeamName(waFullName);
+  const map = NAME_MAP[sport] || {};
+  if (map[clean]) return map[clean];
+  // try case/whitespace insensitive
+  const norm = clean.toLowerCase();
+  for (const k of Object.keys(map)) if (k.toLowerCase() === norm) return map[k];
+  // last resort: match by last word (e.g. "Yankees")
+  const last = norm.split(/\s+/).pop();
+  for (const k of Object.keys(map)) if (k.toLowerCase().endsWith(last)) return map[k];
+  return null;
+}
+
+function waTeamName(line, which) {
+  // which=1 (away) or 2 (home)
+  const raw = line["Team"+which+"ID"] || line["Team"+which+"Description"] || line["Team"+which+"Name"] || line["Team"+which] || "";
+  return cleanTeamName(raw);
+}
+
+function matchGame(sport, line, events) {
+  // In WA API, Team1ID/Team2ID contain the full team names (Team1 is away, Team2 is home)
+  const a1 = resolveAbbr(sport, waTeamName(line,1));
+  const a2 = resolveAbbr(sport, waTeamName(line,2));
+  if (!a1 || !a2) return { away: a1, home: a2, event: null };
+  for (const ev of events) {
+    const comp = ev.competitions && ev.competitions[0];
+    if (!comp) continue;
+    const away = comp.competitors.find(c => c.homeAway === "away");
+    const home = comp.competitors.find(c => c.homeAway === "home");
+    if (!away || !home) continue;
+    const aAbbr = (away.team.abbreviation || "").toUpperCase();
+    const hAbbr = (home.team.abbreviation || "").toUpperCase();
+    if ((aAbbr===a1 && hAbbr===a2) || (aAbbr===a2 && hAbbr===a1)) {
+      return { away:a1, home:a2, event: ev, awayAbbr:aAbbr, homeAbbr:hAbbr };
+    }
+  }
+  return { away:a1, home:a2, event:null };
+}
+
+function extractEventInfo(ev) {
+  if (!ev) return null;
+  const comp = ev.competitions[0];
+  const away = comp.competitors.find(c=>c.homeAway==="away");
+  const home = comp.competitors.find(c=>c.homeAway==="home");
+  const statusName = comp.status && comp.status.type && comp.status.type.name;
+  let status = "SCHEDULED";
+  if (statusName === "STATUS_FINAL") status = "FINAL";
+  else if (statusName === "STATUS_IN_PROGRESS") status = "LIVE";
+  return {
+    status,
+    awayScore: parseInt(away.score||"0",10),
+    homeScore: parseInt(home.score||"0",10),
+    awayName: away.team.displayName,
+    homeName: home.team.displayName,
+    awayAbbr: (away.team.abbreviation||"").toUpperCase(),
+    homeAbbr: (home.team.abbreviation||"").toUpperCase(),
+    date: ev.date,
+    shortName: ev.shortName
+  };
+}
+
+/* ============================================================
+   Graphics: canvas rendering
+   ============================================================ */
+function teamColors(sport, abbr) {
+  return (COLORS[sport] && COLORS[sport][abbr]) || ["#333333","#666666"];
+}
+
+function roundRect(ctx, x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function drawDiagonalStripes(ctx, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.translate(540, 540);
+  ctx.rotate(-Math.PI/6);
+  for (let i=-1200;i<1200;i+=80) ctx.fillRect(i,-1200,2,2400);
+  ctx.restore();
+}
+
+function drawTeamCircle(ctx, cx, cy, r, colors, abbr, borderColor) {
+  const grd = ctx.createRadialGradient(cx-r*0.3, cy-r*0.3, r*0.1, cx, cy, r);
+  grd.addColorStop(0, colors[1]);
+  grd.addColorStop(1, colors[0]);
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = borderColor || "#FFD60A";
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${r*0.55}px -apple-system, Arial, sans-serif`;
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.shadowColor="rgba(0,0,0,0.6)"; ctx.shadowBlur=6;
+  ctx.fillText(abbr, cx, cy);
+  ctx.shadowBlur=0;
+}
+
+function fmtJuice(v){
+  if (v===undefined||v===null||v==="") return "";
+  const n = Number(v);
+  if (isNaN(n)) return String(v);
+  return (n>0?"+":"")+n;
+}
+function fmtSpread(v){
+  if (v===undefined||v===null||v==="") return "";
+  const n = Number(v);
+  if (isNaN(n)) return String(v);
+  return (n>0?"+":"")+n;
+}
+
+function renderPreGame(canvas, sport, waLine, event, eventInfo) {
+  const ctx = canvas.getContext("2d");
+  canvas.width = 1080; canvas.height = 1080;
+
+  // background
+  ctx.fillStyle = "#111"; ctx.fillRect(0,0,1080,1080);
+  // top red accent bar
+  ctx.fillStyle = "#E63946"; ctx.fillRect(0,0,1080,6);
+  // diagonal stripes
+  drawDiagonalStripes(ctx, "#E63946", 0.04);
+
+  // Header
+  ctx.fillStyle = "#fff"; ctx.font="bold 28px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText("WAGERATTACK", 50, 40);
+  ctx.fillStyle="#999"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textAlign="right";
+  ctx.fillText(sport.toUpperCase(), 1030, 46);
+
+  // date/time
+  let dateStr = "";
+  if (event && event.date) {
+    const d = new Date(event.date);
+    dateStr = d.toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).toUpperCase();
+  } else if (waLine.GameDateTime) {
+    dateStr = String(waLine.GameDateTime);
+  }
+  ctx.fillStyle="#FFD60A"; ctx.font="bold 20px -apple-system, Arial, sans-serif"; ctx.textAlign="center";
+  ctx.fillText(dateStr, 540, 100);
+
+  // Team info
+  const awayAbbr = (eventInfo && eventInfo.awayAbbr) || resolveAbbr(sport, waTeamName(waLine,1)) || "AWY";
+  const homeAbbr = (eventInfo && eventInfo.homeAbbr) || resolveAbbr(sport, waTeamName(waLine,2)) || "HOM";
+  const awayName = (eventInfo && eventInfo.awayName) || waTeamName(waLine,1) || "Away Team";
+  const homeName = (eventInfo && eventInfo.homeName) || waTeamName(waLine,2) || "Home Team";
+
+  // Circles
+  drawTeamCircle(ctx, 280, 280, 120, teamColors(sport,awayAbbr), awayAbbr, "#FFD60A");
+  drawTeamCircle(ctx, 800, 280, 120, teamColors(sport,homeAbbr), homeAbbr, "#FFD60A");
+  // VS badge
+  ctx.fillStyle="#E63946"; ctx.beginPath(); ctx.arc(540,280,52,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 36px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText("VS", 540, 280);
+
+  // Team names
+  ctx.fillStyle="#fff"; ctx.font="bold 24px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+  ctx.fillText(awayName, 280, 420);
+  ctx.fillText(homeName, 800, 420);
+
+  // Pitchers (MLB)
+  if (sport==="MLB") {
+    ctx.fillStyle="#999"; ctx.font="16px -apple-system, Arial, sans-serif";
+    const p1 = waLine.ListedPitcher1 || waLine.Pitcher1 || waLine.Team1Pitcher || "";
+    const p2 = waLine.ListedPitcher2 || waLine.Pitcher2 || waLine.Team2Pitcher || "";
+    if (p1) ctx.fillText(p1, 280, 460);
+    if (p2) ctx.fillText(p2, 800, 460);
+  }
+
+  // Odds card
+  const cardY = 540, cardH = 380;
+  ctx.fillStyle = "#1a1a1a";
+  roundRect(ctx, 50, cardY, 980, cardH, 14); ctx.fill();
+  ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=2; ctx.stroke();
+
+  const hasOdds = waLine && (waLine.Spread!==undefined || waLine.MoneyLine1!==undefined || waLine.TotalPoints!==undefined);
+
+  if (!hasOdds) {
+    ctx.fillStyle="#FFD60A"; ctx.font="bold 32px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("Lines available at WagerAttack.ag", 540, cardY+cardH/2);
+  } else {
+    const colW = 980/3;
+    // dividers
+    ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(50+colW, cardY+30); ctx.lineTo(50+colW, cardY+cardH-30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(50+colW*2, cardY+30); ctx.lineTo(50+colW*2, cardY+cardH-30); ctx.stroke();
+
+    // SPREAD
+    const favID = waLine.FavoredTeamID;
+    const favIsAway = favID && String(favID).trim()===String(waLine.Team1ID||"").trim();
+    const favAbbr = favIsAway ? awayAbbr : homeAbbr;
+    const spread = Number(waLine.Spread||0);
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+    ctx.fillText("SPREAD", 50+colW/2, cardY+40);
+    ctx.fillStyle="#FFD60A"; ctx.font="bold 48px -apple-system, Arial, sans-serif";
+    ctx.fillText(`${favAbbr} ${spread}`, 50+colW/2, cardY+80);
+    ctx.fillStyle="#ccc"; ctx.font="18px -apple-system, Arial, sans-serif";
+    ctx.fillText(`${awayAbbr} ${fmtJuice(waLine.SpreadAdj1)}`, 50+colW/2, cardY+160);
+    ctx.fillText(`${homeAbbr} ${fmtJuice(waLine.SpreadAdj2)}`, 50+colW/2, cardY+190);
+
+    // MONEYLINE
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif";
+    ctx.fillText("MONEYLINE", 50+colW+colW/2, cardY+40);
+    const ml1 = fmtJuice(waLine.MoneyLine1);
+    const ml2 = fmtJuice(waLine.MoneyLine2);
+    ctx.font="bold 32px -apple-system, Arial, sans-serif";
+    ctx.fillStyle = favIsAway ? "#FFD60A" : "#fff"; ctx.fillText(`${awayAbbr}  ${ml1}`, 50+colW+colW/2, cardY+90);
+    ctx.fillStyle = !favIsAway ? "#FFD60A" : "#fff"; ctx.fillText(`${homeAbbr}  ${ml2}`, 50+colW+colW/2, cardY+140);
+
+    // TOTAL
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif";
+    ctx.fillText("TOTAL", 50+colW*2+colW/2, cardY+40);
+    const total = waLine.TotalPoints!==undefined ? Number(waLine.TotalPoints) : null;
+    ctx.fillStyle="#FFD60A"; ctx.font="bold 48px -apple-system, Arial, sans-serif";
+    ctx.fillText(total!==null ? `O/U ${total}` : "--", 50+colW*2+colW/2, cardY+80);
+    ctx.fillStyle="#ccc"; ctx.font="18px -apple-system, Arial, sans-serif";
+    ctx.fillText(`OVER ${fmtJuice(waLine.TtlPtsAdj1)}`, 50+colW*2+colW/2, cardY+160);
+    ctx.fillText(`UNDER ${fmtJuice(waLine.TtlPtsAdj2)}`, 50+colW*2+colW/2, cardY+190);
+  }
+
+  // Footer
+  ctx.fillStyle="#666"; ctx.font="14px -apple-system, Arial, sans-serif"; ctx.textAlign="left";
+  ctx.fillText("WagerAttack.ag", 50, 1000);
+  ctx.fillText("Must be 18+ (21+ where applicable)", 50, 1022);
+  ctx.textAlign="right"; ctx.fillText("Lines subject to change", 1030, 1022);
+}
+
+function renderPostGame(canvas, sport, waLine, eventInfo) {
+  const ctx = canvas.getContext("2d");
+  canvas.width = 1080; canvas.height = 1080;
+
+  ctx.fillStyle = "#111"; ctx.fillRect(0,0,1080,1080);
+  ctx.fillStyle = "#E63946"; ctx.fillRect(0,0,1080,6);
+  drawDiagonalStripes(ctx, "#FFD60A", 0.03);
+
+  // Header
+  ctx.fillStyle = "#fff"; ctx.font="bold 28px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText("WAGERATTACK", 50, 40);
+  ctx.fillStyle="#999"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textAlign="right";
+  ctx.fillText(sport.toUpperCase(), 1030, 46);
+
+  // FINAL badge
+  ctx.fillStyle="#E63946";
+  roundRect(ctx, 470, 90, 140, 44, 8); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText("FINAL", 540, 112);
+
+  const awayAbbr = eventInfo.awayAbbr, homeAbbr = eventInfo.homeAbbr;
+  const awayScore = eventInfo.awayScore, homeScore = eventInfo.homeScore;
+  const awayWon = awayScore > homeScore;
+  const tie = awayScore === homeScore;
+
+  // Circles
+  drawTeamCircle(ctx, 280, 280, 130, teamColors(sport,awayAbbr), awayAbbr, awayWon?"#FFD60A":"#333");
+  drawTeamCircle(ctx, 800, 280, 130, teamColors(sport,homeAbbr), homeAbbr, (!awayWon&&!tie)?"#FFD60A":"#333");
+
+  // Scores
+  ctx.font="bold 92px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+  ctx.fillStyle = awayWon?"#FFD60A":"#fff"; ctx.fillText(String(awayScore), 280, 430);
+  ctx.fillStyle = (!awayWon&&!tie)?"#FFD60A":"#fff"; ctx.fillText(String(homeScore), 800, 430);
+
+  // Names
+  ctx.fillStyle="#fff"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textBaseline="top";
+  ctx.fillText(eventInfo.awayName, 280, 545);
+  ctx.fillText(eventInfo.homeName, 800, 545);
+
+  // Results card
+  const cardY = 620, cardH = 320;
+  ctx.fillStyle = "#1a1a1a";
+  roundRect(ctx, 50, cardY, 980, cardH, 14); ctx.fill();
+  ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=2; ctx.stroke();
+
+  const hasOdds = waLine && (waLine.Spread!==undefined || waLine.TotalPoints!==undefined);
+  if (!hasOdds) {
+    ctx.fillStyle="#999"; ctx.font="bold 24px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("Final score • Lines unavailable", 540, cardY+cardH/2);
+  } else {
+    const colW = 980/3;
+    ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(50+colW, cardY+30); ctx.lineTo(50+colW, cardY+cardH-30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(50+colW*2, cardY+30); ctx.lineTo(50+colW*2, cardY+cardH-30); ctx.stroke();
+
+    // SPREAD result
+    const favID = waLine.FavoredTeamID;
+    const favIsAway = favID && String(favID).trim()===String(waLine.Team1ID||"").trim();
+    const favAbbr = favIsAway ? awayAbbr : homeAbbr;
+    const spread = Number(waLine.Spread||0);
+    const margin = Math.abs(awayScore-homeScore);
+    const favWon = favIsAway ? awayWon : (!awayWon && !tie);
+    let spreadResult = "DID NOT COVER", spreadColor="#E63946";
+    if (favWon) {
+      if (margin > Math.abs(spread)) { spreadResult="COVERED"; spreadColor="#2ecc71"; }
+      else if (margin === Math.abs(spread)) { spreadResult="PUSH"; spreadColor="#FFD60A"; }
+    }
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+    ctx.fillText("SPREAD", 50+colW/2, cardY+40);
+    ctx.fillStyle="#fff"; ctx.font="bold 36px -apple-system, Arial, sans-serif";
+    ctx.fillText(`${favAbbr} ${spread}`, 50+colW/2, cardY+75);
+    ctx.fillStyle=spreadColor;
+    roundRect(ctx, 50+colW/2-100, cardY+140, 200, 50, 8); ctx.fill();
+    ctx.fillStyle="#fff"; ctx.font="bold 20px -apple-system, Arial, sans-serif"; ctx.textBaseline="middle";
+    ctx.fillText(spreadResult, 50+colW/2, cardY+165);
+
+    // ML WINNER
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif"; ctx.textBaseline="top";
+    ctx.fillText("ML WINNER", 50+colW+colW/2, cardY+40);
+    if (tie) {
+      ctx.fillStyle="#fff"; ctx.font="bold 28px -apple-system, Arial, sans-serif";
+      ctx.fillText("TIE", 50+colW+colW/2, cardY+90);
+    } else {
+      const winAbbr = awayWon?awayAbbr:homeAbbr;
+      const winName = awayWon?eventInfo.awayName:eventInfo.homeName;
+      const winML = fmtJuice(awayWon?waLine.MoneyLine1:waLine.MoneyLine2);
+      ctx.fillStyle="#FFD60A"; ctx.font="bold 26px -apple-system, Arial, sans-serif";
+      ctx.fillText(winName, 50+colW+colW/2, cardY+90);
+      ctx.fillStyle="#fff"; ctx.font="bold 42px -apple-system, Arial, sans-serif";
+      ctx.fillText(winML, 50+colW+colW/2, cardY+130);
+    }
+
+    // TOTAL result
+    ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif";
+    ctx.fillText("TOTAL", 50+colW*2+colW/2, cardY+40);
+    const total = Number(waLine.TotalPoints||0);
+    const actual = awayScore+homeScore;
+    let totResult="PUSH", totColor="#FFD60A";
+    if (actual>total){ totResult="OVER"; totColor="#2ecc71"; }
+    else if (actual<total){ totResult="UNDER"; totColor="#E63946"; }
+    ctx.fillStyle="#fff"; ctx.font="bold 36px -apple-system, Arial, sans-serif";
+    ctx.fillText(`O/U ${total}`, 50+colW*2+colW/2, cardY+75);
+    ctx.fillStyle="#999"; ctx.font="18px -apple-system, Arial, sans-serif";
+    ctx.fillText(`Actual: ${actual}`, 50+colW*2+colW/2, cardY+118);
+    ctx.fillStyle=totColor;
+    roundRect(ctx, 50+colW*2+colW/2-100, cardY+140, 200, 50, 8); ctx.fill();
+    ctx.fillStyle="#fff"; ctx.font="bold 20px -apple-system, Arial, sans-serif"; ctx.textBaseline="middle";
+    ctx.fillText(totResult, 50+colW*2+colW/2, cardY+165);
+  }
+
+  ctx.fillStyle="#666"; ctx.font="14px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText("WagerAttack.ag", 50, 1000);
+  ctx.fillText("Must be 18+ (21+ where applicable)", 50, 1022);
+  ctx.textAlign="right"; ctx.fillText("Results are final", 1030, 1022);
+}
+
+/* ============================================================
+   Build merged games list
+   ============================================================ */
+function buildGames() {
+  const sport = state.sport;
+  const events = state.espnEvents || [];
+  const lines = state.waLines || [];
+  const used = new Set();
+  const games = [];
+
+  // Start from WA lines if we have them, merge with ESPN
+  for (const line of lines) {
+    // Filter out futures/novelty bets (no real game matchup)
+    const t1 = waTeamName(line,1).toLowerCase();
+    const t2 = waTeamName(line,2).toLowerCase();
+    if (/wins (world series|championship|cup|super bowl|finals)/i.test(t1) ||
+        /wins (world series|championship|cup|super bowl|finals)/i.test(t2) ||
+        /team wins/i.test(t1) || /team wins/i.test(t2) ||
+        /to win/i.test(t1) || /to win/i.test(t2)) continue;
+    const m = matchGame(sport, line, events);
+    const info = m.event ? extractEventInfo(m.event) : null;
+    if (m.event) used.add(m.event.id);
+    games.push({ key: line.GameNum || line.GameID || line.Team1ID+"-"+line.Team2ID, waLine: line, event: m.event, eventInfo: info });
+  }
+  // Add any ESPN games not matched
+  for (const ev of events) {
+    if (used.has(ev.id)) continue;
+    const info = extractEventInfo(ev);
+    games.push({ key: ev.id, waLine: null, event: ev, eventInfo: info });
+  }
+  state.games = games;
+}
+
+/* ============================================================
+   UI rendering
+   ============================================================ */
+function setStatus(which, s, msg) {
+  const el = document.getElementById(which==="WA"?"stWA":"stESPN");
+  const label = which==="WA"?"WagerAttack":"ESPN";
+  const text = msg || ({load:"connecting…", ok:"connected", err:"offline"}[s]);
+  el.innerHTML = `<span class="dot ${s}"></span>${label}: ${text}`;
+}
+
+function renderBanner() {
+  const el = document.getElementById("banner");
+  if (state.waStatus==="err") {
+    el.innerHTML = `<div class="banner warn">Could not connect to WagerAttack odds${state.waError?` (${state.waError})`:""}. Showing ESPN scores only — graphics will render without odds.</div>`;
+  } else { el.innerHTML = ""; }
+}
+
+function renderGames() {
+  const root = document.getElementById("games");
+  const games = state.games;
+  document.getElementById("count").textContent = `${games.length} game${games.length===1?"":"s"} • ${state.sport}`;
+  if (!games.length) { root.innerHTML = `<div class="empty">No games found today.</div>`; return; }
+  root.innerHTML = "";
+  games.forEach((g, i) => {
+    const info = g.eventInfo;
+    const wa = g.waLine;
+    const awayAbbr = info?info.awayAbbr: (wa?resolveAbbr(state.sport, waTeamName(wa,1)):"?");
+    const homeAbbr = info?info.homeAbbr: (wa?resolveAbbr(state.sport, waTeamName(wa,2)):"?");
+    const awayName = info?info.awayName: (wa?waTeamName(wa,1):"Away");
+    const homeName = info?info.homeName: (wa?waTeamName(wa,2):"Home");
+    const status = info?info.status:"SCHEDULED";
+    const badgeClass = status==="LIVE"?"live":status==="FINAL"?"final":"sched";
+    const when = info&&info.date ? new Date(info.date).toLocaleString('en-US',{weekday:'short',hour:'numeric',minute:'2-digit'}) : "";
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="teams">${awayAbbr} ${awayName} @ ${homeAbbr} ${homeName}</div>
+      <div class="time">${when} <span class="badge ${badgeClass}">${status}</span></div>
+      ${status!=="SCHEDULED"&&info?`<div class="score">${info.awayScore} — ${info.homeScore}</div>`:""}
+      ${wa?`<div class="lines">
+        <span>Spread: ${fmtSpread(wa.Spread)}</span>
+        <span>ML: ${fmtJuice(wa.MoneyLine1)}/${fmtJuice(wa.MoneyLine2)}</span>
+        <span>O/U: ${wa.TotalPoints!==undefined?wa.TotalPoints:"--"}</span>
+      </div>`:`<div class="no-odds">No WagerAttack odds available</div>`}
+      <canvas data-idx="${i}" data-type="pre"></canvas>
+      <div class="actions">
+        <button data-dl="${i}" data-type="pre">⬇ Pre-Game PNG</button>
+        ${status==="FINAL"?`<button data-dl="${i}" data-type="post" class="primary">⬇ Final PNG</button>`:""}
+      </div>
+    `;
+    root.appendChild(card);
+    const canvas = card.querySelector("canvas");
+    // Render preview
+    try {
+      if (wa || info) {
+        renderPreGame(canvas, state.sport, wa||{}, g.event, info);
+      }
+    } catch(e){ console.error("render pre-game failed", e); }
+  });
+
+  // Wire download buttons
+  root.querySelectorAll("button[data-dl]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const idx = parseInt(b.dataset.dl,10);
+      const type = b.dataset.type;
+      downloadGraphic(idx, type);
+    });
+  });
+}
+
+function downloadGraphic(idx, type) {
+  const g = state.games[idx];
+  if (!g) return;
+  const canvas = document.createElement("canvas");
+  if (type==="post" && g.eventInfo && g.eventInfo.status==="FINAL") {
+    renderPostGame(canvas, state.sport, g.waLine||{}, g.eventInfo);
+  } else {
+    renderPreGame(canvas, state.sport, g.waLine||{}, g.event, g.eventInfo);
+  }
+  const awayAbbr = g.eventInfo?g.eventInfo.awayAbbr:(g.waLine?resolveAbbr(state.sport,waTeamName(g.waLine,1)):"AWY");
+  const homeAbbr = g.eventInfo?g.eventInfo.homeAbbr:(g.waLine?resolveAbbr(state.sport,waTeamName(g.waLine,2)):"HOM");
+  const fn = `WA_${state.sport}_${awayAbbr}-${homeAbbr}_${type}.png`;
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = fn;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function downloadAll() {
+  for (let i=0;i<state.games.length;i++) {
+    const g = state.games[i];
+    if (g.eventInfo && g.eventInfo.status==="FINAL") downloadGraphic(i,"post");
+    else downloadGraphic(i,"pre");
+    await new Promise(r=>setTimeout(r,200));
+  }
+}
+
+/* ============================================================
+   Init / load flow
+   ============================================================ */
+async function loadSport(sport) {
+  state.sport = sport;
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.sport===sport));
+  document.getElementById("games").innerHTML = `<div class="empty">Loading ${sport}…</div>`;
+
+  // ESPN
+  try {
+    setStatus("ESPN","load");
+    state.espnEvents = await espnScoreboard(sport);
+    state.espnStatus = "ok"; setStatus("ESPN","ok",`${state.espnEvents.length} games`);
+  } catch(e) {
+    state.espnStatus="err"; state.espnEvents=[]; setStatus("ESPN","err", e.message);
+  }
+
+  // WagerAttack
+  try {
+    if (!state.token) await waAuth();
+    state.waLines = await waGetLines(sport);
+    state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
+    state.waError = null;
+  } catch(e) {
+    // try re-auth once
+    try {
+      await waAuth();
+      state.waLines = await waGetLines(sport);
+      state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
+    } catch(e2) {
+      state.waStatus="err"; state.waLines=[]; state.waError=e2.message;
+      setStatus("WA","err", e2.message);
+    }
+  }
+
+  renderBanner();
+  buildGames();
+  renderGames();
+}
+
+function init() {
+  document.querySelectorAll(".tab").forEach(t=>{
+    t.addEventListener("click", ()=>loadSport(t.dataset.sport));
+  });
+  document.getElementById("refresh").addEventListener("click", ()=>{ state.token=null; loadSport(state.sport); });
+  document.getElementById("dlAll").addEventListener("click", downloadAll);
+  loadSport("MLB");
+}
+
+init();
+</script>
+</body>
+</html>
