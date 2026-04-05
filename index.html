@@ -67,6 +67,7 @@
   <div class="bar">
     <div class="count" id="count">Loading…</div>
     <button id="dlSlate">⬇ Slate Graphic</button>
+    <button id="shSlate">📤 Share Slate</button>
     <button class="yellow" id="dlAll">⬇ Download All</button>
   </div>
 
@@ -713,6 +714,7 @@ function renderGames() {
       <div class="actions">
         <button data-dl="${i}" data-type="pre">⬇ Pre-Game PNG</button>
         ${status==="FINAL"?`<button data-dl="${i}" data-type="post" class="primary">⬇ Final PNG</button>`:""}
+        <button data-sh="${i}" data-type="${status==="FINAL"?"post":"pre"}">📤 Share</button>
       </div>
     `;
     root.appendChild(card);
@@ -731,6 +733,14 @@ function renderGames() {
       const idx = parseInt(b.dataset.dl,10);
       const type = b.dataset.type;
       downloadGraphic(idx, type);
+    });
+  });
+  // Wire share buttons
+  root.querySelectorAll("button[data-sh]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const idx = parseInt(b.dataset.sh,10);
+      const type = b.dataset.type;
+      shareGraphic(idx, type);
     });
   });
 }
@@ -851,6 +861,65 @@ function downloadSlate() {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+/* ============================================================
+   Share (Telegram + Instagram via native share sheet on mobile,
+   download + Telegram web-share fallback on desktop)
+   ============================================================ */
+const WA_SITE_URL = "https://walkillz.github.io/wa-graphics/";
+function showToast(msg, ms){
+  let t=document.getElementById("__wa_toast");
+  if(!t){ t=document.createElement("div"); t.id="__wa_toast";
+    t.style.cssText="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:12px 18px;border:1px solid #E63946;border-radius:8px;font:bold 14px -apple-system,Arial,sans-serif;z-index:99999;max-width:90%;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.5)";
+    document.body.appendChild(t);
+  }
+  t.textContent=msg; t.style.display="block";
+  clearTimeout(t.__timer); t.__timer=setTimeout(()=>t.style.display="none", ms||4000);
+}
+function canvasToBlob(canvas){
+  return new Promise(res => canvas.toBlob(b => res(b), "image/png"));
+}
+async function shareCanvas(canvas, filename, caption){
+  const blob = await canvasToBlob(canvas);
+  if(!blob){ showToast("Could not generate image"); return; }
+  const file = new File([blob], filename, {type:"image/png"});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try {
+      await navigator.share({files:[file], title:"WagerAttack", text:caption});
+      return;
+    } catch(e){ if(e.name==="AbortError") return; console.warn("share failed, falling back", e); }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  try { await navigator.clipboard.writeText(caption); } catch(e){}
+  const tgUrl = "https://t.me/share/url?url=" + encodeURIComponent(WA_SITE_URL) + "&text=" + encodeURIComponent(caption);
+  window.open(tgUrl, "_blank", "noopener");
+  showToast("PNG saved + caption copied. Telegram opened in new tab. For Instagram, upload the PNG from the IG app.", 6000);
+}
+function shareGraphic(idx, type){
+  const g = state.games[idx]; if(!g) return;
+  const canvas = document.createElement("canvas");
+  if(type==="post" && g.eventInfo && g.eventInfo.status==="FINAL"){
+    renderPostGame(canvas, state.sport, g.waLine||{}, g.eventInfo);
+  } else {
+    renderPreGame(canvas, state.sport, g.waLine||{}, g.event, g.eventInfo);
+  }
+  const awayAbbr = g.eventInfo?g.eventInfo.awayAbbr:"AWY";
+  const homeAbbr = g.eventInfo?g.eventInfo.homeAbbr:"HOM";
+  const fn = `WA_${state.sport}_${awayAbbr}-${homeAbbr}_${type}.png`;
+  const caption = `${awayAbbr} @ ${homeAbbr} — ${state.sport} odds on WagerAttack. ${WA_SITE_URL} #WagerAttack #${state.sport}`;
+  shareCanvas(canvas, fn, caption);
+}
+function shareSlate(){
+  const canvas = document.createElement("canvas");
+  renderSlate(canvas, state.sport, state.games||[]);
+  const fn = `WA_${state.sport}_slate.png`;
+  const today = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const caption = `${today} ${state.sport} slate — lines on WagerAttack. ${WA_SITE_URL} #WagerAttack #${state.sport}`;
+  shareCanvas(canvas, fn, caption);
+}
+
 async function downloadAll() {
   for (let i=0;i<state.games.length;i++) {
     const g = state.games[i];
@@ -948,6 +1017,7 @@ function init() {
   document.getElementById("refresh").addEventListener("click", ()=>{ state.token=null; loadSport(state.sport); });
   document.getElementById("dlAll").addEventListener("click", downloadAll);
   document.getElementById("dlSlate").addEventListener("click", downloadSlate);
+  document.getElementById("shSlate").addEventListener("click", shareSlate);
   loadSport("MLB");
   startAutoRefresh();
 }
