@@ -66,6 +66,7 @@
 
   <div class="bar">
     <div class="count" id="count">Loading…</div>
+    <button id="dlSlate">⬇ Slate Graphic</button>
     <button class="yellow" id="dlAll">⬇ Download All</button>
   </div>
 
@@ -291,9 +292,40 @@ function extractEventInfo(ev) {
     homeName: home.team.displayName,
     awayAbbr: (away.team.abbreviation||"").toUpperCase(),
     homeAbbr: (home.team.abbreviation||"").toUpperCase(),
+    awayLogo: away.team.logo || "",
+    homeLogo: home.team.logo || "",
     date: ev.date,
     shortName: ev.shortName
   };
+}
+
+/* ---------- Image cache ---------- */
+const imgCache = {};
+function loadImage(url) {
+  if (!url) return Promise.resolve(null);
+  if (imgCache[url]) return imgCache[url];
+  imgCache[url] = new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+  return imgCache[url];
+}
+function getLogo(url) {
+  // synchronous accessor: returns resolved Image or null
+  if (!url || !imgCache[url]) return null;
+  // best-effort: if the promise already resolved, return the image
+  const p = imgCache[url];
+  return p && p.__resolved || null;
+}
+async function preloadLogos(urls) {
+  const uniq = [...new Set(urls.filter(Boolean))];
+  await Promise.all(uniq.map(async u => {
+    const img = await loadImage(u);
+    imgCache[u].__resolved = img;
+  }));
 }
 
 /* ============================================================
@@ -323,21 +355,33 @@ function drawDiagonalStripes(ctx, color, alpha) {
   ctx.restore();
 }
 
-function drawTeamCircle(ctx, cx, cy, r, colors, abbr, borderColor) {
+function drawTeamCircle(ctx, cx, cy, r, colors, abbr, borderColor, logoImg) {
   const grd = ctx.createRadialGradient(cx-r*0.3, cy-r*0.3, r*0.1, cx, cy, r);
   grd.addColorStop(0, colors[1]);
   grd.addColorStop(1, colors[0]);
   ctx.fillStyle = grd;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  // Logo (clipped to circle) on top of gradient
+  if (logoImg) {
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx,cy,r-6,0,Math.PI*2); ctx.clip();
+    // white inner disc for logo contrast
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.beginPath(); ctx.arc(cx,cy,r-6,0,Math.PI*2); ctx.fill();
+    const sz = (r-6)*1.55;
+    ctx.drawImage(logoImg, cx-sz/2, cy-sz/2, sz, sz);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${r*0.55}px -apple-system, Arial, sans-serif`;
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.shadowColor="rgba(0,0,0,0.6)"; ctx.shadowBlur=6;
+    ctx.fillText(abbr, cx, cy);
+    ctx.shadowBlur=0;
+  }
   ctx.strokeStyle = borderColor || "#FFD60A";
   ctx.lineWidth = 5;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.font = `bold ${r*0.55}px -apple-system, Arial, sans-serif`;
-  ctx.textAlign="center"; ctx.textBaseline="middle";
-  ctx.shadowColor="rgba(0,0,0,0.6)"; ctx.shadowBlur=6;
-  ctx.fillText(abbr, cx, cy);
-  ctx.shadowBlur=0;
 }
 
 function fmtJuice(v){
@@ -388,8 +432,10 @@ function renderPreGame(canvas, sport, waLine, event, eventInfo) {
   const homeName = (eventInfo && eventInfo.homeName) || waTeamName(waLine,2) || "Home Team";
 
   // Circles
-  drawTeamCircle(ctx, 280, 280, 120, teamColors(sport,awayAbbr), awayAbbr, "#FFD60A");
-  drawTeamCircle(ctx, 800, 280, 120, teamColors(sport,homeAbbr), homeAbbr, "#FFD60A");
+  const awayLogo = eventInfo && getLogo(eventInfo.awayLogo);
+  const homeLogo = eventInfo && getLogo(eventInfo.homeLogo);
+  drawTeamCircle(ctx, 280, 280, 120, teamColors(sport,awayAbbr), awayAbbr, "#FFD60A", awayLogo);
+  drawTeamCircle(ctx, 800, 280, 120, teamColors(sport,homeAbbr), homeAbbr, "#FFD60A", homeLogo);
   // VS badge
   ctx.fillStyle="#E63946"; ctx.beginPath(); ctx.arc(540,280,52,0,Math.PI*2); ctx.fill();
   ctx.fillStyle="#fff"; ctx.font="bold 36px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -493,8 +539,10 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
   const tie = awayScore === homeScore;
 
   // Circles
-  drawTeamCircle(ctx, 280, 280, 130, teamColors(sport,awayAbbr), awayAbbr, awayWon?"#FFD60A":"#333");
-  drawTeamCircle(ctx, 800, 280, 130, teamColors(sport,homeAbbr), homeAbbr, (!awayWon&&!tie)?"#FFD60A":"#333");
+  const awayLogo = getLogo(eventInfo.awayLogo);
+  const homeLogo = getLogo(eventInfo.homeLogo);
+  drawTeamCircle(ctx, 280, 280, 130, teamColors(sport,awayAbbr), awayAbbr, awayWon?"#FFD60A":"#333", awayLogo);
+  drawTeamCircle(ctx, 800, 280, 130, teamColors(sport,homeAbbr), homeAbbr, (!awayWon&&!tie)?"#FFD60A":"#333", homeLogo);
 
   // Scores
   ctx.font="bold 92px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
@@ -705,6 +753,104 @@ function downloadGraphic(idx, type) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+function renderSlate(canvas, sport, games) {
+  const ctx = canvas.getContext("2d");
+  canvas.width = 1080; canvas.height = 1080;
+  ctx.fillStyle = "#111"; ctx.fillRect(0,0,1080,1080);
+  ctx.fillStyle = "#E63946"; ctx.fillRect(0,0,1080,6);
+  drawDiagonalStripes(ctx, "#E63946", 0.04);
+
+  // Header
+  ctx.fillStyle="#fff"; ctx.font="bold 32px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText("WAGERATTACK", 50, 40);
+  ctx.fillStyle="#999"; ctx.font="bold 24px -apple-system, Arial, sans-serif"; ctx.textAlign="right";
+  ctx.fillText("TODAY'S "+sport.toUpperCase()+" SLATE", 1030, 46);
+
+  // Subheader date
+  const today = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}).toUpperCase();
+  ctx.fillStyle="#FFD60A"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textAlign="center";
+  ctx.fillText(today, 540, 95);
+
+  // Column headers
+  const startY = 150;
+  ctx.fillStyle="#999"; ctx.font="bold 14px -apple-system, Arial, sans-serif"; ctx.textBaseline="top";
+  ctx.textAlign="left"; ctx.fillText("MATCHUP", 60, startY);
+  ctx.textAlign="center"; ctx.fillText("SPREAD", 640, startY);
+  ctx.fillText("TOTAL", 790, startY);
+  ctx.fillText("ML", 940, startY);
+  ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(50,startY+24); ctx.lineTo(1030,startY+24); ctx.stroke();
+
+  // Rows (max 14)
+  const rows = games.slice(0,14);
+  const rowH = 56;
+  let y = startY + 36;
+  rows.forEach((g, idx) => {
+    const wa = g.waLine;
+    const info = g.eventInfo;
+    const awayAbbr = info?info.awayAbbr:(wa?resolveAbbr(sport,waTeamName(wa,1)):"AWY");
+    const homeAbbr = info?info.homeAbbr:(wa?resolveAbbr(sport,waTeamName(wa,2)):"HOM");
+    // Alt row background
+    if (idx%2===0){ ctx.fillStyle="#1a1a1a"; ctx.fillRect(50,y-6,980,rowH-4); }
+    // Mini circles
+    const awayLogo = info && getLogo(info.awayLogo);
+    const homeLogo = info && getLogo(info.homeLogo);
+    drawTeamCircle(ctx, 85, y+18, 20, teamColors(sport,awayAbbr), awayAbbr, "#333", awayLogo);
+    drawTeamCircle(ctx, 135, y+18, 20, teamColors(sport,homeAbbr), homeAbbr, "#333", homeLogo);
+    // Matchup text
+    ctx.fillStyle="#fff"; ctx.font="bold 18px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="middle";
+    ctx.fillText(`${awayAbbr} @ ${homeAbbr}`, 170, y+18);
+    // Time
+    ctx.fillStyle="#999"; ctx.font="12px -apple-system, Arial, sans-serif";
+    const when = info&&info.date ? new Date(info.date).toLocaleString('en-US',{hour:'numeric',minute:'2-digit'}) : "";
+    const statusTxt = info&&info.status==="FINAL" ? "FINAL" : (info&&info.status==="LIVE"?"LIVE":when);
+    ctx.fillText(statusTxt, 170, y+38);
+    // Spread
+    ctx.fillStyle="#FFD60A"; ctx.font="bold 18px -apple-system, Arial, sans-serif"; ctx.textAlign="center";
+    if (wa && wa.Spread!==undefined) {
+      const favID = wa.FavoredTeamID;
+      const favIsAway = favID && String(favID).trim()===String(wa.Team1ID||"").trim();
+      const favAbbr = favIsAway?awayAbbr:homeAbbr;
+      ctx.fillText(`${favAbbr} ${Number(wa.Spread)}`, 640, y+18);
+    } else { ctx.fillStyle="#555"; ctx.fillText("--", 640, y+18); }
+    // Total
+    ctx.fillStyle="#FFD60A"; ctx.font="bold 18px -apple-system, Arial, sans-serif";
+    if (wa && wa.TotalPoints!==undefined) ctx.fillText(`O/U ${wa.TotalPoints}`, 790, y+18);
+    else { ctx.fillStyle="#555"; ctx.fillText("--", 790, y+18); }
+    // ML
+    ctx.fillStyle="#ccc"; ctx.font="bold 14px -apple-system, Arial, sans-serif";
+    if (wa && wa.MoneyLine1!==undefined) {
+      ctx.fillText(`${fmtJuice(wa.MoneyLine1)}/${fmtJuice(wa.MoneyLine2)}`, 940, y+18);
+    } else { ctx.fillStyle="#555"; ctx.fillText("--", 940, y+18); }
+    // Score if final/live
+    if (info && (info.status==="FINAL"||info.status==="LIVE")) {
+      ctx.fillStyle="#fff"; ctx.font="bold 14px -apple-system, Arial, sans-serif"; ctx.textAlign="left";
+      ctx.fillText(`${info.awayScore}-${info.homeScore}`, 500, y+18);
+    }
+    y += rowH;
+  });
+
+  if (games.length>14) {
+    ctx.fillStyle="#999"; ctx.font="italic 14px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+    ctx.fillText(`+ ${games.length-14} more games`, 540, y+10);
+  }
+
+  // Footer
+  ctx.fillStyle="#666"; ctx.font="14px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText("WagerAttack.ag", 50, 1000);
+  ctx.fillText("Must be 18+ (21+ where applicable)", 50, 1022);
+  ctx.textAlign="right"; ctx.fillText("Lines subject to change", 1030, 1022);
+}
+
+function downloadSlate() {
+  const canvas = document.createElement("canvas");
+  renderSlate(canvas, state.sport, state.games||[]);
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = `WA_${state.sport}_slate.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
 async function downloadAll() {
   for (let i=0;i<state.games.length;i++) {
     const g = state.games[i];
@@ -751,7 +897,48 @@ async function loadSport(sport) {
 
   renderBanner();
   buildGames();
+  // Preload logos, then render (fast — small PNGs)
+  const logoUrls = [];
+  state.games.forEach(g => { if (g.eventInfo) { logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo); } });
+  try { await preloadLogos(logoUrls); } catch(e) { console.warn("logo preload", e); }
   renderGames();
+}
+
+/* ---------- Silent refresh (no loading UI wipe) ---------- */
+async function silentRefresh() {
+  const sport = state.sport;
+  try {
+    state.espnEvents = await espnScoreboard(sport);
+    state.espnStatus = "ok"; setStatus("ESPN","ok",`${state.espnEvents.length} games`);
+  } catch(e) { state.espnStatus="err"; setStatus("ESPN","err", e.message); }
+  try {
+    if (!state.token) await waAuth();
+    state.waLines = await waGetLines(sport);
+    state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
+  } catch(e) {
+    try { await waAuth(); state.waLines = await waGetLines(sport); state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`); }
+    catch(e2){ state.waStatus="err"; state.waError=e2.message; setStatus("WA","err",e2.message); }
+  }
+  renderBanner();
+  buildGames();
+  const logoUrls = [];
+  state.games.forEach(g => { if (g.eventInfo) { logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo); } });
+  try { await preloadLogos(logoUrls); } catch(e) {}
+  renderGames();
+}
+
+function hasLiveGame() {
+  return (state.games||[]).some(g => g.eventInfo && g.eventInfo.status === "LIVE");
+}
+
+let __liveTimer=null, __fullTimer=null;
+function startAutoRefresh() {
+  if (__liveTimer) clearInterval(__liveTimer);
+  if (__fullTimer) clearInterval(__fullTimer);
+  // 30s tick: refresh scores only if a game is live
+  __liveTimer = setInterval(() => { if (hasLiveGame()) silentRefresh(); }, 30000);
+  // 5 min tick: always refresh schedule + odds
+  __fullTimer = setInterval(silentRefresh, 300000);
 }
 
 function init() {
@@ -760,7 +947,9 @@ function init() {
   });
   document.getElementById("refresh").addEventListener("click", ()=>{ state.token=null; loadSport(state.sport); });
   document.getElementById("dlAll").addEventListener("click", downloadAll);
+  document.getElementById("dlSlate").addEventListener("click", downloadSlate);
   loadSport("MLB");
+  startAutoRefresh();
 }
 
 init();
