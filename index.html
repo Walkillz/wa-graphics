@@ -532,9 +532,11 @@ function renderPreGame(canvas, sport, waLine, event, eventInfo) {
   const awayName = (eventInfo && eventInfo.awayName) || waTeamName(waLine,1) || "Away Team";
   const homeName = (eventInfo && eventInfo.homeName) || waTeamName(waLine,2) || "Home Team";
 
-  // Circles
-  const awayLogo = eventInfo && getLogo(eventInfo.awayLogo);
-  const homeLogo = eventInfo && getLogo(eventInfo.homeLogo);
+  // Circles — try eventInfo logo, then fallback URL
+  const awayLogoUrl = (eventInfo && eventInfo.awayLogo) || getTeamLogo(sport, awayAbbr, null);
+  const homeLogoUrl = (eventInfo && eventInfo.homeLogo) || getTeamLogo(sport, homeAbbr, null);
+  const awayLogo = getLogo(awayLogoUrl);
+  const homeLogo = getLogo(homeLogoUrl);
   drawTeamCircle(ctx, 280, 280, 120, teamColors(sport,awayAbbr), awayAbbr, "#FFD60A", awayLogo);
   drawTeamCircle(ctx, 800, 280, 120, teamColors(sport,homeAbbr), homeAbbr, "#FFD60A", homeLogo);
   // VS badge
@@ -639,9 +641,11 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
   const awayWon = awayScore > homeScore;
   const tie = awayScore === homeScore;
 
-  // Circles
-  const awayLogo = getLogo(eventInfo.awayLogo);
-  const homeLogo = getLogo(eventInfo.homeLogo);
+  // Circles — try eventInfo logo, then fallback URL
+  const awayLogoUrl = eventInfo.awayLogo || getTeamLogo(sport, awayAbbr, null);
+  const homeLogoUrl = eventInfo.homeLogo || getTeamLogo(sport, homeAbbr, null);
+  const awayLogo = getLogo(awayLogoUrl);
+  const homeLogo = getLogo(homeLogoUrl);
   drawTeamCircle(ctx, 280, 280, 130, teamColors(sport,awayAbbr), awayAbbr, awayWon?"#FFD60A":"#333", awayLogo);
   drawTeamCircle(ctx, 800, 280, 130, teamColors(sport,homeAbbr), homeAbbr, (!awayWon&&!tie)?"#FFD60A":"#333", homeLogo);
 
