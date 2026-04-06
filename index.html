@@ -174,7 +174,35 @@ const state = {
   waLines: [],             // raw WA lines for current sport
   espnEvents: [],          // ESPN events for current sport
   games: [],               // merged games ready to render
+  linesCache: {},          // persist WA lines across refreshes: key → line object
 };
+
+/* ---------- Lines cache helpers ---------- */
+function buildLineKey(sport, line) {
+  const t1 = cleanTeamName(line.Team1ID || line.Team1Description || line.Team1Name || "");
+  const t2 = cleanTeamName(line.Team2ID || line.Team2Description || line.Team2Name || "");
+  return `${sport}_${t1}_${t2}`;
+}
+function updateLinesCache(sport, lines) {
+  lines.forEach(line => {
+    const key = buildLineKey(sport, line);
+    if (key) state.linesCache[key] = line;
+  });
+}
+function getCachedLine(sport, line) {
+  const key = buildLineKey(sport, line);
+  return state.linesCache[key] || null;
+}
+function getCachedLineByAbbrs(sport, awayAbbr, homeAbbr) {
+  // Try to find cached line by looking up all cached keys for this sport
+  for (const [key, val] of Object.entries(state.linesCache)) {
+    if (!key.startsWith(sport + "_")) continue;
+    const a1 = resolveAbbr(sport, cleanTeamName(val.Team1ID || val.Team1Description || val.Team1Name || ""));
+    const a2 = resolveAbbr(sport, cleanTeamName(val.Team2ID || val.Team2Description || val.Team2Name || ""));
+    if ((a1 === awayAbbr && a2 === homeAbbr) || (a1 === homeAbbr && a2 === awayAbbr)) return val;
+  }
+  return null;
+}
 
 /* ============================================================
    API helpers
@@ -276,8 +304,9 @@ function matchGame(sport, line, events) {
   return { away:a1, home:a2, event:null };
 }
 
-function extractEventInfo(ev) {
+function extractEventInfo(ev, sport) {
   if (!ev) return null;
+  sport = sport || state.sport;
   const comp = ev.competitions[0];
   const away = comp.competitors.find(c=>c.homeAway==="away");
   const home = comp.competitors.find(c=>c.homeAway==="home");
@@ -285,19 +314,35 @@ function extractEventInfo(ev) {
   let status = "SCHEDULED";
   if (statusName === "STATUS_FINAL") status = "FINAL";
   else if (statusName === "STATUS_IN_PROGRESS") status = "LIVE";
+  const awayAbbr = (away.team.abbreviation||"").toUpperCase();
+  const homeAbbr = (home.team.abbreviation||"").toUpperCase();
   return {
     status,
     awayScore: parseInt(away.score||"0",10),
     homeScore: parseInt(home.score||"0",10),
     awayName: away.team.displayName,
     homeName: home.team.displayName,
-    awayAbbr: (away.team.abbreviation||"").toUpperCase(),
-    homeAbbr: (home.team.abbreviation||"").toUpperCase(),
-    awayLogo: away.team.logo || "",
-    homeLogo: home.team.logo || "",
+    awayAbbr,
+    homeAbbr,
+    awayLogo: getTeamLogo(sport, awayAbbr, away.team.logo),
+    homeLogo: getTeamLogo(sport, homeAbbr, home.team.logo),
     date: ev.date,
     shortName: ev.shortName
   };
+}
+
+/* ---------- Team logo fallback ---------- */
+function getTeamLogo(sport, abbr, espnLogoUrl) {
+  // Primary: ESPN API logo
+  if (espnLogoUrl) return espnLogoUrl;
+  // Fallback: ESPN static URL pattern
+  const sportPath = { MLB: "mlb", NBA: "nba", NHL: "nhl" };
+  const s = sportPath[sport];
+  if (s && abbr) {
+    return `https://a.espncdn.com/i/teamlogos/${s}/500/${abbr.toLowerCase()}.png`;
+  }
+  // Return null — rendering code draws a text circle fallback
+  return null;
 }
 
 /* ---------- Image cache ---------- */
@@ -383,6 +428,61 @@ function drawTeamCircle(ctx, cx, cy, r, colors, abbr, borderColor, logoImg) {
   ctx.strokeStyle = borderColor || "#FFD60A";
   ctx.lineWidth = 5;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+}
+
+/* ---------- Result indicator icons ---------- */
+function drawCheckmark(ctx, x, y, size) {
+  size = size || 24;
+  // Green circle
+  ctx.beginPath();
+  ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = "#4ade80";
+  ctx.fill();
+  // White check path
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.25, y);
+  ctx.lineTo(x - size * 0.05, y + size * 0.2);
+  ctx.lineTo(x + size * 0.25, y - size * 0.2);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+function drawXmark(ctx, x, y, size) {
+  size = size || 24;
+  // Red circle
+  ctx.beginPath();
+  ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = "#f87171";
+  ctx.fill();
+  // White X
+  const d = size * 0.2;
+  ctx.beginPath();
+  ctx.moveTo(x - d, y - d);
+  ctx.lineTo(x + d, y + d);
+  ctx.moveTo(x + d, y - d);
+  ctx.lineTo(x - d, y + d);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.stroke();
+}
+function drawPushIcon(ctx, x, y, size) {
+  size = size || 24;
+  // Yellow circle
+  ctx.beginPath();
+  ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = "#FFD60A";
+  ctx.fill();
+  // White dash
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.2, y);
+  ctx.lineTo(x + size * 0.2, y);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.stroke();
 }
 
 function fmtJuice(v){
@@ -550,6 +650,12 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
   ctx.fillStyle = awayWon?"#FFD60A":"#fff"; ctx.fillText(String(awayScore), 280, 430);
   ctx.fillStyle = (!awayWon&&!tie)?"#FFD60A":"#fff"; ctx.fillText(String(homeScore), 800, 430);
 
+  // Winning team checkmark next to score
+  if (!tie) {
+    if (awayWon) drawCheckmark(ctx, 380, 470, 30);
+    else drawCheckmark(ctx, 900, 470, 30);
+  }
+
   // Names
   ctx.fillStyle="#fff"; ctx.font="bold 22px -apple-system, Arial, sans-serif"; ctx.textBaseline="top";
   ctx.fillText(eventInfo.awayName, 280, 545);
@@ -582,6 +688,8 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
     if (favWon) {
       if (margin > Math.abs(spread)) { spreadResult="COVERED"; spreadColor="#2ecc71"; }
       else if (margin === Math.abs(spread)) { spreadResult="PUSH"; spreadColor="#FFD60A"; }
+    } else if (!favWon && !tie && margin === Math.abs(spread)) {
+      spreadResult="PUSH"; spreadColor="#FFD60A";
     }
     ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
     ctx.fillText("SPREAD", 50+colW/2, cardY+40);
@@ -591,6 +699,11 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
     roundRect(ctx, 50+colW/2-100, cardY+140, 200, 50, 8); ctx.fill();
     ctx.fillStyle="#fff"; ctx.font="bold 20px -apple-system, Arial, sans-serif"; ctx.textBaseline="middle";
     ctx.fillText(spreadResult, 50+colW/2, cardY+165);
+    // Spread result icon
+    const spreadIconX = 50+colW/2+105, spreadIconY = cardY+165;
+    if (spreadResult==="COVERED") drawCheckmark(ctx, spreadIconX, spreadIconY, 22);
+    else if (spreadResult==="PUSH") drawPushIcon(ctx, spreadIconX, spreadIconY, 22);
+    else drawXmark(ctx, spreadIconX, spreadIconY, 22);
 
     // ML WINNER
     ctx.fillStyle="#999"; ctx.font="bold 16px -apple-system, Arial, sans-serif"; ctx.textBaseline="top";
@@ -598,12 +711,18 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
     if (tie) {
       ctx.fillStyle="#fff"; ctx.font="bold 28px -apple-system, Arial, sans-serif";
       ctx.fillText("TIE", 50+colW+colW/2, cardY+90);
+      drawPushIcon(ctx, 50+colW+colW/2+50, cardY+90, 22);
     } else {
       const winAbbr = awayWon?awayAbbr:homeAbbr;
       const winName = awayWon?eventInfo.awayName:eventInfo.homeName;
       const winML = fmtJuice(awayWon?waLine.MoneyLine1:waLine.MoneyLine2);
       ctx.fillStyle="#FFD60A"; ctx.font="bold 26px -apple-system, Arial, sans-serif";
       ctx.fillText(winName, 50+colW+colW/2, cardY+90);
+      // Checkmark next to winner name
+      ctx.save();
+      const nameW = ctx.measureText(winName).width;
+      drawCheckmark(ctx, 50+colW+colW/2 + nameW/2 + 18, cardY+100, 22);
+      ctx.restore();
       ctx.fillStyle="#fff"; ctx.font="bold 42px -apple-system, Arial, sans-serif";
       ctx.fillText(winML, 50+colW+colW/2, cardY+130);
     }
@@ -614,16 +733,22 @@ function renderPostGame(canvas, sport, waLine, eventInfo) {
     const total = Number(waLine.TotalPoints||0);
     const actual = awayScore+homeScore;
     let totResult="PUSH", totColor="#FFD60A";
-    if (actual>total){ totResult="OVER"; totColor="#2ecc71"; }
-    else if (actual<total){ totResult="UNDER"; totColor="#E63946"; }
+    if (actual>total){ totResult=`OVER (${actual})`; totColor="#2ecc71"; }
+    else if (actual<total){ totResult=`UNDER (${actual})`; totColor="#E63946"; }
+    else { totResult=`PUSH (${actual})`; }
     ctx.fillStyle="#fff"; ctx.font="bold 36px -apple-system, Arial, sans-serif";
     ctx.fillText(`O/U ${total}`, 50+colW*2+colW/2, cardY+75);
     ctx.fillStyle="#999"; ctx.font="18px -apple-system, Arial, sans-serif";
     ctx.fillText(`Actual: ${actual}`, 50+colW*2+colW/2, cardY+118);
     ctx.fillStyle=totColor;
-    roundRect(ctx, 50+colW*2+colW/2-100, cardY+140, 200, 50, 8); ctx.fill();
+    roundRect(ctx, 50+colW*2+colW/2-120, cardY+140, 240, 50, 8); ctx.fill();
     ctx.fillStyle="#fff"; ctx.font="bold 20px -apple-system, Arial, sans-serif"; ctx.textBaseline="middle";
     ctx.fillText(totResult, 50+colW*2+colW/2, cardY+165);
+    // Total result icon
+    const totIconX = 50+colW*2+colW/2+125, totIconY = cardY+165;
+    if (actual>total) drawCheckmark(ctx, totIconX, totIconY, 22);
+    else if (actual<total) drawXmark(ctx, totIconX, totIconY, 22);
+    else drawPushIcon(ctx, totIconX, totIconY, 22);
   }
 
   ctx.fillStyle="#666"; ctx.font="14px -apple-system, Arial, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
@@ -652,15 +777,19 @@ function buildGames() {
         /team wins/i.test(t1) || /team wins/i.test(t2) ||
         /to win/i.test(t1) || /to win/i.test(t2)) continue;
     const m = matchGame(sport, line, events);
-    const info = m.event ? extractEventInfo(m.event) : null;
+    const info = m.event ? extractEventInfo(m.event, sport) : null;
     if (m.event) used.add(m.event.id);
+    // Cache this line
+    updateLinesCache(sport, [line]);
     games.push({ key: line.GameNum || line.GameID || line.Team1ID+"-"+line.Team2ID, waLine: line, event: m.event, eventInfo: info });
   }
-  // Add any ESPN games not matched
+  // Add any ESPN games not matched — try to find cached WA lines for them
   for (const ev of events) {
     if (used.has(ev.id)) continue;
-    const info = extractEventInfo(ev);
-    games.push({ key: ev.id, waLine: null, event: ev, eventInfo: info });
+    const info = extractEventInfo(ev, sport);
+    // Look up cached lines for this game
+    const cachedLine = info ? getCachedLineByAbbrs(sport, info.awayAbbr, info.homeAbbr) : null;
+    games.push({ key: ev.id, waLine: cachedLine, event: ev, eventInfo: info });
   }
   state.games = games;
 }
@@ -950,6 +1079,7 @@ async function loadSport(sport) {
   try {
     if (!state.token) await waAuth();
     state.waLines = await waGetLines(sport);
+    if (state.waLines.length) updateLinesCache(sport, state.waLines);
     state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
     state.waError = null;
   } catch(e) {
@@ -957,6 +1087,7 @@ async function loadSport(sport) {
     try {
       await waAuth();
       state.waLines = await waGetLines(sport);
+      if (state.waLines.length) updateLinesCache(sport, state.waLines);
       state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
     } catch(e2) {
       state.waStatus="err"; state.waLines=[]; state.waError=e2.message;
@@ -966,9 +1097,19 @@ async function loadSport(sport) {
 
   renderBanner();
   buildGames();
-  // Preload logos, then render (fast — small PNGs)
+  // Preload logos (including fallback URLs), then render
   const logoUrls = [];
-  state.games.forEach(g => { if (g.eventInfo) { logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo); } });
+  state.games.forEach(g => {
+    if (g.eventInfo) {
+      logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo);
+    } else if (g.waLine) {
+      // Generate fallback logos for WA-only games
+      const a = resolveAbbr(sport, waTeamName(g.waLine,1));
+      const h = resolveAbbr(sport, waTeamName(g.waLine,2));
+      if (a) logoUrls.push(getTeamLogo(sport, a, null));
+      if (h) logoUrls.push(getTeamLogo(sport, h, null));
+    }
+  });
   try { await preloadLogos(logoUrls); } catch(e) { console.warn("logo preload", e); }
   renderGames();
 }
@@ -983,15 +1124,25 @@ async function silentRefresh() {
   try {
     if (!state.token) await waAuth();
     state.waLines = await waGetLines(sport);
+    if (state.waLines.length) updateLinesCache(sport, state.waLines);
     state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`);
   } catch(e) {
-    try { await waAuth(); state.waLines = await waGetLines(sport); state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`); }
+    try { await waAuth(); state.waLines = await waGetLines(sport); if (state.waLines.length) updateLinesCache(sport, state.waLines); state.waStatus="ok"; setStatus("WA","ok",`${state.waLines.length} lines`); }
     catch(e2){ state.waStatus="err"; state.waError=e2.message; setStatus("WA","err",e2.message); }
   }
   renderBanner();
   buildGames();
   const logoUrls = [];
-  state.games.forEach(g => { if (g.eventInfo) { logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo); } });
+  state.games.forEach(g => {
+    if (g.eventInfo) {
+      logoUrls.push(g.eventInfo.awayLogo, g.eventInfo.homeLogo);
+    } else if (g.waLine) {
+      const a = resolveAbbr(sport, waTeamName(g.waLine,1));
+      const h = resolveAbbr(sport, waTeamName(g.waLine,2));
+      if (a) logoUrls.push(getTeamLogo(sport, a, null));
+      if (h) logoUrls.push(getTeamLogo(sport, h, null));
+    }
+  });
   try { await preloadLogos(logoUrls); } catch(e) {}
   renderGames();
 }
